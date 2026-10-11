@@ -1,29 +1,73 @@
-# 克图 ketu
+<p align="center"><img src="icon-192.png" width="96" alt="Porcelain icon"></p>
+<h1 align="center">Porcelain</h1>
+<p align="center"><b>On-device face retouching in your browser. Your photos never leave your device.</b><br>
+Clone it, open your AI coding agent, and tune it into <i>your</i> beauty app.</p>
 
-手搓的开源美颜修图小 App（醒图平替·能用版）。单文件 Web App，全部本地处理，照片不离开设备。
+<p align="center"><a href="https://tian-9.github.io/porcelain/">▶ Try it live</a> — add it to your home screen and it installs as an offline app.</p>
 
-- **线上版（artifact，私有）**: https://claude.ai/artifact/V8oNe3R5g25yBDCppKHJKh
-- **技术栈**: MediaPipe Face Landmarker（WASM，478 关键点，打包在 `vendor/`）+ WebGL 管线
-- **功能 v0.1**: 磨皮（导皮肤 mask + 边缘保护）、美白、瘦脸、大眼、瘦鼻、亮眼、6 款滤镜（调性偏清透白皙）、按住对比、保存（claude.ai 里走 downloads 能力，否则长按图片兜底）
-- **v0.1.1**: 加法令纹淡化——鼻翼→嘴角专属遮罩带（mask B 通道，双描抗模糊稀释），shader 里 `max(col, blur*1.04)` 只提沟影暗部、保皮肤纹理；实测深纹中年脸有效且无亮带伪影
-- **v0.2**（甲方真图调校版）: ①法令纹升级为**侧采样**——参考色从沟两侧干净皮肤取（`uFoldO0/O1` 法向偏移），深沟不再被自己的影子拉暗参考值；②新增**收颊**滑杆（中脸颊 lm 50/205/280/425 向鼻中轴收，和瘦脸分管上下半张脸）；③**画布缩放**——双指捏合/滚轮/双击放大图片（最大 8x），工具条固定不动
+| Before | After |
+|---|---|
+| ![before](docs/demo-before.png) | ![after](docs/demo-after.png) |
 
-## 开发
+<sup>Demo portrait is AI-generated — not a real person. Settings: smooth 55 · brighten 30 · smile lines 60 · slim jaw 20 · cheeks 45.</sup>
 
-- 源文件就是 `index.html`（含 DEV-SKELETON 哨兵段，本地直接可开）
-- 本地测试：`python3 -m http.server 8788` 然后开 `http://localhost:8788/index.html`
-- 发布构建（剥掉哨兵段后发 artifact）：
-  ```sh
-  mkdir -p dist && sed -e '/DEV-SKELETON-START/,/DEV-SKELETON-END/d' \
-    -e '/DEV-SKELETON-TAIL-START/,/DEV-SKELETON-TAIL-END/d' index.html > dist/index.html
-  ```
-  然后发布 `dist/index.html` 到上面那个 artifact URL（vendor 文件已在线上，没改就不用重传）。
+## Why
 
-## 调参位置
+Every mainstream retouch app wants your selfies on their servers. Porcelain is a single HTML file plus a bundled face-landmark model: no backend, no account, no analytics, no uploads. After the first load it works with networking off entirely.
 
-- 变形力度/半径：`buildOps()`（瘦脸 0.13、大眼 0.22、瘦鼻 0.14）
-- 磨皮细节回贴量：FS_MAIN 里 `0.22`；边缘保护阈值 `smoothstep(0.09, 0.28, diff)`
-- 滤镜：`FILTERS` 数组，六元组 = exposure(档)/contrast/saturation/temp/tint/fade
-- 法令纹：遮罩带宽 `faceW*0.055`、横向偏移 1.5% 脸宽（buildMaskCanvas）；增益 `*1.35`、提亮超调 `blur*1.04`（FS_MAIN）
-- 调试钩子（留着给未来调参）：`window.__ketuMask`（遮罩画布）、`__ketuRender`（同步渲染，绕开后台标签页 rAF 停摆）、`__ketuParams`
-- 模型文件叫 `face_landmarker.task.wasm`：`.task` 不在 artifact 可服务扩展名里，借 `.wasm` 马甲，内容未动
+## Features
+
+- **Skin smoothing** with edge protection — pores and hair stay sharp, blemishes go
+- **Smile-line (nasolabial fold) softening** — lifts only the crease shadow toward clean skin sampled from *both sides* of the fold, so skin texture survives
+- **Slim jaw · slim cheeks · bigger eyes · slim nose** — landmark-guided liquify, tuned to stay subtle
+- **Brighten, eye light, 6 filters** tuned for a clean, luminous aesthetic
+- Pinch / scroll / double-tap **zoom** (toolbar stays put), hold-to-**compare**, one-tap glow-up
+- **PWA**: installable, offline-capable, works on phone and desktop
+- UI auto-switches **English / 中文**
+
+## How it works
+
+[MediaPipe Face Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/face_landmarker) (WASM, bundled in `vendor/`, runs locally) pins 478 landmarks on the face. Everything else is one WebGL fragment shader:
+
+- **Warping** (slim/eyes/nose) is inverse displacement sampling — a controlled funhouse mirror, fully reversible
+- **Smoothing** mixes in a Gaussian-blurred layer, masked to skin polygons, with an edge-keep term and high-frequency re-add
+- **Fold softening** builds a mask band from nose wing to mouth corner and lifts only pixels darker than neighboring clean skin (`max(col, sideRef)`) — a digital concealer that touches shadows, not texture
+
+All GPU, real-time sliders, up to 2048px working resolution.
+
+## Clone it, make it yours
+
+This repo ships with a **Claude Code skill** (`.claude/skills/retouch-lab/`) and a `CLAUDE.md` codebase map. Clone it, open [Claude Code](https://claude.com/claude-code) (or any AI coding agent), and just say:
+
+- *"Make max smoothing stronger"*
+- *"Add a teeth-whitening slider"*
+- *"My smile lines run lower — move the mask band down"*
+- *"Add a warm sunset filter"*
+
+Every tunable constant is documented with its file location and safe range. The agent can also run the app locally and verify changes visually using the built-in debug hooks.
+
+## Run locally
+
+```sh
+git clone https://github.com/Tian-9/porcelain && cd porcelain
+python3 -m http.server 8788   # any static server works
+# open http://localhost:8788/index.html
+```
+
+No build step. No dependencies.
+
+## Privacy
+
+- Photos are decoded, processed and exported entirely inside your browser tab
+- The only network requests are for the app's own code and one Google font; the service worker caches them, after which it runs offline
+- Nothing is logged, stored or sent anywhere
+
+## 中文说明
+
+Porcelain（中文界面叫**克图**）是一个纯前端的本地美颜修图 App：磨皮（保毛孔）、美白、**法令纹淡化**（只提沟影不糊皮肤）、瘦脸、收颊、大眼、瘦鼻、亮眼、六款滤镜（清透白皙调性）。照片全程不出设备，加载一次后断网可用，手机浏览器里"添加到主屏幕"即可当 App 使用。
+
+仓库自带 Claude Code skill：clone 之后打开 Claude Code，直接说"磨皮上限调狠一点 / 加个美牙滑杆 / 法令纹遮罩往下挪"，AI 会按 `CLAUDE.md` 里的参数地图改给你，并在本地起服务验证效果。
+
+## License
+
+MIT — do whatever makes you glow. ✨

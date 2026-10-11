@@ -12,7 +12,7 @@
 </head>
 <body>
 <!-- DEV-SKELETON-END -->
-<title>克图</title>
+<title>Porcelain</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=ZCOOL+XiaoWei&display=swap">
 <style>
 /* 布局：单屏 app —— 顶栏 / 画布舞台 / 底部操作面板，深色影调，胭脂点缀 */
@@ -75,7 +75,7 @@ header .spacer{flex:1}
 .tab.on{color:var(--accent);border-bottom-color:var(--accent)}
 .pane{padding:10px 16px 14px;max-height:34vh;overflow-y:auto}
 
-.srow{display:grid;grid-template-columns:3.2em 1fr 2.6em;align-items:center;gap:10px;padding:5px 0}
+.srow{display:grid;grid-template-columns:minmax(3.2em,max-content) 1fr 2.6em;align-items:center;gap:10px;padding:5px 0}
 .srow label{font-size:13px;color:var(--fg)}
 .srow output{font-size:12px;color:var(--muted);text-align:right;font-variant-numeric:tabular-nums}
 .srow input[type=range]{
@@ -184,12 +184,12 @@ let compare = false, downloadsNS = undefined; // undefined = 未探测
 const params = { smooth:30, whiten:20, fold:0, slim:0, cheek:0, eye:0, nose:0, bright:0 };
 // 滤镜：exposure(档), contrast, saturation, temp, tint, fade —— 调性偏清透白皙，不走欧美蜜棕
 const FILTERS = [
-  { name:'原片', g:[0,1,1,0,0,0] },
-  { name:'奶油', g:[0.12,0.96,0.95,0.5,0.05,0.25] },
-  { name:'冷白', g:[0.18,1.02,0.88,-0.45,-0.05,0.10] },
-  { name:'日杂', g:[0.10,0.90,0.80,0.15,-0.2,0.35] },
-  { name:'蜜桃', g:[0.08,1.03,1.12,0.35,0.25,0.08] },
-  { name:'黑白', g:[0.05,1.08,0,0,0,0.15] },
+  { name:'原片', en:'Original', g:[0,1,1,0,0,0] },
+  { name:'奶油', en:'Cream',    g:[0.12,0.96,0.95,0.5,0.05,0.25] },
+  { name:'冷白', en:'Cool fair',g:[0.18,1.02,0.88,-0.45,-0.05,0.10] },
+  { name:'日杂', en:'Film',     g:[0.10,0.90,0.80,0.15,-0.2,0.35] },
+  { name:'蜜桃', en:'Peach',    g:[0.08,1.03,1.12,0.35,0.25,0.08] },
+  { name:'黑白', en:'B&W',      g:[0.05,1.08,0,0,0,0.15] },
 ];
 let filterIdx = 0;
 
@@ -199,6 +199,26 @@ function toast(msg, ms=2600){
   toastEl.textContent = msg; toastEl.classList.add('show');
   clearTimeout(toastTimer); toastTimer = setTimeout(()=>toastEl.classList.remove('show'), ms);
 }
+
+/* ---------- i18n：中文环境显示克图，其余显示 Porcelain 英文界面 ---------- */
+const isZH = (navigator.language||'zh').toLowerCase().startsWith('zh');
+const L = (zh,en) => isZH ? zh : en;
+if(isZH){
+  document.title = '克图';
+} else try {
+  $('#logo').textContent = 'Porcelain';
+  $('#status').textContent = 'Loading beauty engine…';
+  const T = { btnNew:'Photo', btnReset:'Reset', btnCompare:'Compare⌛', btnSave:'Save',
+    btnPick:'Choose photo', btnAuto:'Quick glow-up', btnZero:'Zero all' };
+  for(const [id,t] of Object.entries(T)) document.getElementById(id).textContent = t;
+  const labels = ['Smooth','Brighten','Smile lines','Slim jaw','Cheeks','Big eyes','Slim nose','Eye light'];
+  document.querySelectorAll('#pane-beauty .srow label').forEach((el,i)=>{ el.textContent = labels[i]; });
+  const tabs = ['Beauty','Filters'];
+  document.querySelectorAll('.tab').forEach((el,i)=>{ el.textContent = tabs[i]; });
+  $('#drop h2').textContent = 'Choose a photo to retouch';
+  $('#drop p').innerHTML = 'Everything runs in your browser — photos never leave your device.<br>On a phone you can shoot straight from the camera.';
+  $('#stageHint').textContent = 'Hold "Compare" to see the original';
+} catch(e){ console.error('[ketu] i18n apply failed', e); }
 
 /* ---------- MediaPipe ---------- */
 async function initLandmarker(){
@@ -213,7 +233,7 @@ async function initLandmarker(){
     statusEl.textContent = '';
   }catch(e){
     console.error('[ketu] landmarker init failed', e);
-    statusEl.textContent = '人脸引擎没起来，滤镜仍可用';
+    statusEl.textContent = L('人脸引擎没起来，滤镜仍可用','Face engine failed — filters still work');
   }
 }
 
@@ -450,7 +470,7 @@ function mkTex(w,h){
 }
 function initGL(){
   gl = glCanvas.getContext('webgl', {preserveDrawingBuffer:true});
-  if(!gl){ toast('这设备不支持 WebGL，开不了工 😢', 6000); return false; }
+  if(!gl){ toast(L('这设备不支持 WebGL，开不了工 😢','This device has no WebGL support 😢'), 6000); return false; }
   progMain = program(FS_MAIN);
   progBlur = program(FS_BLUR);
   quadBuf = gl.createBuffer();
@@ -558,7 +578,7 @@ function render(){
 async function loadFile(file){
   let bmp;
   try{ bmp = await createImageBitmap(file, {imageOrientation:'from-image'}); }
-  catch{ toast('这张格式读不出来，换张 JPG/PNG 试试'); return; }
+  catch{ toast(L('这张格式读不出来，换张 JPG/PNG 试试','Could not read this format — try a JPG/PNG')); return; }
   const MAX = 2048;
   const k = Math.min(1, MAX/Math.max(bmp.width,bmp.height));
   imgW = Math.round(bmp.width*k); imgH = Math.round(bmp.height*k);
@@ -598,7 +618,7 @@ async function loadFile(file){
   $('#panel').hidden = false; $('#stageHint').hidden = false;
   // 没脸：磨皮/瘦脸/大眼/瘦鼻/亮眼全禁用，只留美白+滤镜
   for(const id of ['smooth','fold','slim','cheek','eye','nose','bright']) $('#s-'+id).disabled = !faceOK;
-  if(!faceOK) toast('没认出人脸——滤镜和美白还能用，变形类先歇着');
+  if(!faceOK) toast(L('没认出人脸——滤镜和美白还能用，变形类先歇着','No face detected — filters still work, face tools are off'));
   requestRender();
 }
 
@@ -607,14 +627,14 @@ async function doSave(){
   if(!imgW) return;
   compare = false; render(); // 确保 buffer 是当前效果
   const blob = await new Promise(r => glCanvas.toBlob(r, 'image/jpeg', 0.92));
-  if(!blob){ toast('导出失败了'); return; }
-  const name = 'ketu-' + new Date().toISOString().slice(5,16).replace(/[-:T]/g,'') + '.jpg';
+  if(!blob){ toast(L('导出失败了','Export failed')); return; }
+  const name = 'porcelain-' + new Date().toISOString().slice(5,16).replace(/[-:T]/g,'') + '.jpg';
   if(downloadsNS === undefined){
     try{ downloadsNS = window.claude?.use ? await window.claude.use('downloads') : null; }
     catch{ downloadsNS = null; }
   }
   if(downloadsNS){
-    try{ await downloadsNS.save({filename:name, data:blob}); toast('已保存 ✓'); return; }
+    try{ await downloadsNS.save({filename:name, data:blob}); toast(L('已保存 ✓','Saved ✓')); return; }
     catch(e){ if(e && e.code==='declined') return; /* 其余走兜底 */ }
   }
   // 真浏览器（GitHub Pages / 本地）：直接触发下载
@@ -623,13 +643,13 @@ async function doSave(){
     const a = document.createElement('a'); a.href = url; a.download = name;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(()=>URL.revokeObjectURL(url), 10000);
-    toast('已保存到下载/相册 ✓');
+    toast(L('已保存到下载/相册 ✓','Saved to downloads ✓'));
     return;
   }
   // 兜底：长按/右键保存
   const url = URL.createObjectURL(blob);
   const ov = document.createElement('div'); ov.id='saveOverlay';
-  ov.innerHTML = `<p>手机长按图片保存到相册，电脑右键另存为</p><img alt="修好的图"><button class="hbtn">关闭</button>`;
+  ov.innerHTML = `<p>${L('手机长按图片保存到相册，电脑右键另存为','Long-press (mobile) or right-click (desktop) the image to save')}</p><img alt="retouched"><button class="hbtn">${L('关闭','Close')}</button>`;
   ov.querySelector('img').src = url;
   ov.querySelector('button').onclick = ()=>{ URL.revokeObjectURL(url); ov.remove(); };
   document.body.appendChild(ov);
@@ -745,7 +765,7 @@ const filtersBox = $('#filters');
 FILTERS.forEach((f,i)=>{
   const b = document.createElement('button');
   b.className = 'fchip' + (i===0?' on':'');
-  b.innerHTML = `<div class="dot"></div><span>${f.name}</span>`;
+  b.innerHTML = `<div class="dot"></div><span>${isZH ? f.name : f.en}</span>`;
   // 小色卡示意
   const hue = [ 'linear-gradient(135deg,#8a7a68,#5c5248)',
     'linear-gradient(135deg,#e8c9a8,#c9a183)','linear-gradient(135deg,#dfe3ea,#aab4c4)',

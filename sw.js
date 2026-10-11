@@ -1,5 +1,5 @@
-// 克图 service worker：预缓存全部资产，缓存优先 → 首次加载后离线可用
-const CACHE = 'ketu-v3';
+// Porcelain service worker: precache all assets, cache-first → works offline after first load
+const CACHE = 'porcelain-v1';
 const ASSETS = [
   './',
   './index.html',

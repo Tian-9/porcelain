@@ -1,7 +1,7 @@
 {
-  "name": "克图",
-  "short_name": "克图",
-  "description": "本地美颜修图：磨皮、法令纹、瘦脸收颊，照片不上传",
+  "name": "Porcelain",
+  "short_name": "Porcelain",
+  "description": "On-device face retouching in your browser — photos never leave your device.",
   "start_url": ".",
   "scope": ".",
   "display": "standalone",
