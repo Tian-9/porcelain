@@ -1,0 +1,774 @@
+<!-- DEV-SKELETON-START -->
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#17130f">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>:root{padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0)}body{margin:0;font:14px system-ui}img{max-width:100%}[hidden]{display:none!important}</style>
+</head>
+<body>
+<!-- DEV-SKELETON-END -->
+<title>克图</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=ZCOOL+XiaoWei&display=swap">
+<style>
+/* 布局：单屏 app —— 顶栏 / 画布舞台 / 底部操作面板，深色影调，胭脂点缀 */
+:root{
+  --bg:#17130f;
+  --panel:#211c16;
+  --panel-2:#2a241c;
+  --line:#383023;
+  --fg:#f1e9dd;
+  --muted:#a2957f;
+  --accent:#e8a9a2;
+  --accent-deep:#c97b73;
+  --accent-ink:#2b1a17;
+  --display:"ZCOOL XiaoWei","Songti SC",serif;
+  color-scheme:dark;
+}
+html,body{height:100%}
+body{
+  background:var(--bg);color:var(--fg);
+  font-family:-apple-system,"PingFang SC","Noto Sans CJK SC",system-ui,sans-serif;
+  overflow:hidden;
+  touch-action:pan-x pan-y;overscroll-behavior:none;
+}
+#app{height:100%;display:flex;flex-direction:column}
+
+header{
+  display:flex;align-items:center;gap:12px;
+  padding:10px 16px;border-bottom:1px solid var(--line);
+  background:var(--panel);
+}
+#logo{font-family:var(--display);font-size:22px;letter-spacing:2px;color:var(--accent)}
+#status{font-size:11px;color:var(--muted)}
+header .spacer{flex:1}
+.hbtn{
+  background:var(--panel-2);color:var(--fg);border:1px solid var(--line);
+  border-radius:8px;padding:7px 13px;font-size:13px;cursor:pointer;
+  -webkit-user-select:none;user-select:none;touch-action:none;
+}
+.hbtn:active{background:var(--line)}
+.hbtn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
+.hbtn:disabled{opacity:.4;cursor:default}
+
+#stage{flex:1;min-height:0;position:relative;display:flex;align-items:center;justify-content:center;background:#100d0a;overflow:hidden;touch-action:none}
+#gl{max-width:100%;max-height:100%;display:block;transform-origin:center center;will-change:transform}
+#drop{
+  display:flex;flex-direction:column;align-items:center;gap:14px;
+  border:1.5px dashed var(--line);border-radius:16px;
+  padding:42px 30px;margin:16px;text-align:center;max-width:320px;
+}
+#drop h2{font-family:var(--display);font-weight:400;font-size:20px;margin:0;color:var(--fg)}
+#drop p{margin:0;font-size:12px;color:var(--muted);line-height:1.7}
+#stageHint{position:absolute;left:0;right:0;bottom:10px;text-align:center;font-size:11px;color:var(--muted);pointer-events:none;opacity:.85}
+
+#panel{background:var(--panel);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom,0)}
+#tabs{display:flex;gap:4px;padding:8px 16px 0}
+.tab{
+  background:none;border:none;color:var(--muted);font-size:14px;padding:8px 14px;cursor:pointer;
+  border-bottom:2px solid transparent;font-family:var(--display);letter-spacing:1px;
+}
+.tab.on{color:var(--accent);border-bottom-color:var(--accent)}
+.pane{padding:10px 16px 14px;max-height:34vh;overflow-y:auto}
+
+.srow{display:grid;grid-template-columns:3.2em 1fr 2.6em;align-items:center;gap:10px;padding:5px 0}
+.srow label{font-size:13px;color:var(--fg)}
+.srow output{font-size:12px;color:var(--muted);text-align:right;font-variant-numeric:tabular-nums}
+.srow input[type=range]{
+  width:100%;min-width:0;appearance:none;-webkit-appearance:none;height:26px;background:none;
+}
+.srow input[type=range]::-webkit-slider-runnable-track{height:3px;border-radius:2px;background:var(--line)}
+.srow input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;width:18px;height:18px;margin-top:-7.5px;border-radius:50%;
+  background:var(--accent);border:2px solid var(--accent-ink);box-shadow:0 1px 4px rgba(0,0,0,.5);
+}
+.srow input[type=range]:disabled::-webkit-slider-thumb{background:var(--muted)}
+.quick{display:flex;gap:8px;margin-bottom:6px}
+
+#filters{display:flex;gap:10px;overflow-x:auto;padding:6px 2px}
+.fchip{
+  flex:0 0 auto;display:flex;flex-direction:column;align-items:center;gap:6px;
+  background:none;border:none;cursor:pointer;padding:4px;
+}
+.fchip .dot{
+  width:52px;height:52px;border-radius:12px;border:2px solid transparent;
+  background:var(--panel-2);
+}
+.fchip.on .dot{border-color:var(--accent)}
+.fchip span{font-size:12px;color:var(--muted)}
+.fchip.on span{color:var(--accent)}
+
+#toast{
+  position:absolute;top:14px;left:50%;transform:translateX(-50%);
+  background:rgba(20,16,12,.92);border:1px solid var(--line);color:var(--fg);
+  padding:9px 16px;border-radius:10px;font-size:13px;max-width:85%;
+  opacity:0;transition:opacity .25s;pointer-events:none;z-index:9;
+}
+#toast.show{opacity:1}
+
+#saveOverlay{
+  position:fixed;inset:0;background:rgba(10,8,6,.9);z-index:20;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:20px;
+}
+#saveOverlay img{max-width:92%;max-height:70%;border-radius:8px}
+#saveOverlay p{color:var(--fg);font-size:13px;margin:0}
+</style>
+
+<div id="app">
+  <header>
+    <span id="logo">克图</span>
+    <span id="status">美颜引擎加载中…</span>
+    <span class="spacer"></span>
+    <button class="hbtn" id="btnNew">换图</button>
+    <button class="hbtn" id="btnReset">重置</button>
+    <button class="hbtn" id="btnCompare">对比⌛</button>
+    <button class="hbtn primary" id="btnSave">保存</button>
+  </header>
+
+  <div id="stage">
+    <canvas id="gl" hidden></canvas>
+    <div id="drop">
+      <h2>选张照片，开修</h2>
+      <p>全程在你设备里处理，照片不会上传。<br>手机上可以直接调相机自拍。</p>
+      <button class="hbtn primary" id="btnPick">选照片</button>
+    </div>
+    <div id="stageHint" hidden>按住「对比」看原图</div>
+    <div id="toast"></div>
+  </div>
+
+  <div id="panel" hidden>
+    <div id="tabs">
+      <button class="tab on" data-pane="beauty">美颜</button>
+      <button class="tab" data-pane="filter">滤镜</button>
+    </div>
+    <div class="pane" id="pane-beauty">
+      <div class="quick">
+        <button class="hbtn" id="btnAuto">一键顺手修</button>
+        <button class="hbtn" id="btnZero">全归零</button>
+      </div>
+      <div class="srow"><label>磨皮</label><input type="range" id="s-smooth" min="0" max="100" value="30"><output>30</output></div>
+      <div class="srow"><label>美白</label><input type="range" id="s-whiten" min="0" max="100" value="20"><output>20</output></div>
+      <div class="srow"><label>法令纹</label><input type="range" id="s-fold" min="0" max="100" value="0"><output>0</output></div>
+      <div class="srow"><label>瘦脸</label><input type="range" id="s-slim"   min="0" max="100" value="0"><output>0</output></div>
+      <div class="srow"><label>收颊</label><input type="range" id="s-cheek"  min="0" max="100" value="0"><output>0</output></div>
+      <div class="srow"><label>大眼</label><input type="range" id="s-eye"    min="0" max="100" value="0"><output>0</output></div>
+      <div class="srow"><label>瘦鼻</label><input type="range" id="s-nose"   min="0" max="100" value="0"><output>0</output></div>
+      <div class="srow"><label>亮眼</label><input type="range" id="s-bright" min="0" max="100" value="0"><output>0</output></div>
+    </div>
+    <div class="pane" id="pane-filter" hidden>
+      <div id="filters"></div>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="file" accept="image/*" hidden>
+
+<script type="module">
+import { FilesetResolver, FaceLandmarker } from './vendor/tasks_vision_bundle.mjs';
+
+const $ = s => document.querySelector(s);
+const stage = $('#stage'), glCanvas = $('#gl'), drop = $('#drop');
+const statusEl = $('#status'), toastEl = $('#toast');
+
+let landmarker = null, landmarks = null;
+let foldU = { o0:[0,0], o1:[0,0], split:0.5 };
+let gl, progMain, progBlur, quadBuf;
+let texImg, texBlur, texMask, fboBlurA, fboBlurB, texBlurA;
+let imgW = 0, imgH = 0, faceOK = false;
+let compare = false, downloadsNS = undefined; // undefined = 未探测
+
+const params = { smooth:30, whiten:20, fold:0, slim:0, cheek:0, eye:0, nose:0, bright:0 };
+// 滤镜：exposure(档), contrast, saturation, temp, tint, fade —— 调性偏清透白皙，不走欧美蜜棕
+const FILTERS = [
+  { name:'原片', g:[0,1,1,0,0,0] },
+  { name:'奶油', g:[0.12,0.96,0.95,0.5,0.05,0.25] },
+  { name:'冷白', g:[0.18,1.02,0.88,-0.45,-0.05,0.10] },
+  { name:'日杂', g:[0.10,0.90,0.80,0.15,-0.2,0.35] },
+  { name:'蜜桃', g:[0.08,1.03,1.12,0.35,0.25,0.08] },
+  { name:'黑白', g:[0.05,1.08,0,0,0,0.15] },
+];
+let filterIdx = 0;
+
+/* ---------- 工具 ---------- */
+let toastTimer;
+function toast(msg, ms=2600){
+  toastEl.textContent = msg; toastEl.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(()=>toastEl.classList.remove('show'), ms);
+}
+
+/* ---------- MediaPipe ---------- */
+async function initLandmarker(){
+  try{
+    const fileset = await FilesetResolver.forVisionTasks('./vendor/wasm');
+    const opts = d => ({
+      baseOptions:{ modelAssetPath:'./vendor/face_landmarker.task.wasm', delegate:d },
+      runningMode:'IMAGE', numFaces:1,
+    });
+    try{ landmarker = await FaceLandmarker.createFromOptions(fileset, opts('GPU')); }
+    catch{ landmarker = await FaceLandmarker.createFromOptions(fileset, opts('CPU')); }
+    statusEl.textContent = '';
+  }catch(e){
+    console.error('[ketu] landmarker init failed', e);
+    statusEl.textContent = '人脸引擎没起来，滤镜仍可用';
+  }
+}
+
+/* ---------- 关键点索引（MediaPipe FaceMesh 468+iris） ---------- */
+const OVAL  = [10,338,297,332,284,251,389,356,454,323,361,288,397,365,379,378,400,377,152,148,176,149,150,136,172,58,132,93,234,127,162,21,54,103,67,109];
+const EYE_L = [33,246,161,160,159,158,157,173,133,155,154,153,145,144,163,7];
+const EYE_R = [362,398,384,385,386,387,388,466,263,249,390,373,374,380,381,382];
+const BROW_L= [70,63,105,66,107,55,65,52,53,46];
+const BROW_R= [300,293,334,296,336,285,295,282,283,276];
+const LIPS  = [61,146,91,181,84,17,314,405,321,375,291,409,270,269,267,0,37,39,40,185];
+
+const pt = i => landmarks[i];
+const centroid = idxs => {
+  let x=0,y=0; for(const i of idxs){x+=pt(i).x;y+=pt(i).y}
+  return {x:x/idxs.length, y:y/idxs.length};
+};
+const dist2 = (a,b) => Math.hypot(a.x-b.x, a.y-b.y);
+
+/* ---------- 皮肤/眼睛 mask（2D canvas 画多边形，R=皮肤 G=眼睛） ---------- */
+function polyPath(ctx, idxs, w, h, scaleAbout=null, k=1){
+  ctx.beginPath();
+  idxs.forEach((i,n)=>{
+    let x=pt(i).x, y=pt(i).y;
+    if(scaleAbout){ x = scaleAbout.x + (x-scaleAbout.x)*k; y = scaleAbout.y + (y-scaleAbout.y)*k; }
+    n ? ctx.lineTo(x*w, y*h) : ctx.moveTo(x*w, y*h);
+  });
+  ctx.closePath();
+}
+function buildMaskCanvas(){
+  const w = Math.round(imgW/2), h = Math.round(imgH/2);
+  const faceW = dist2(pt(234), pt(454)) * imgW; // 大致脸宽(px, 原图尺度)
+  const feather = Math.max(3, faceW*0.035/2);
+
+  const mk = () => { const c=document.createElement('canvas'); c.width=w; c.height=h; return c; };
+  const skin = mk(), sctx = skin.getContext('2d');
+  sctx.filter = `blur(${feather}px)`;
+  sctx.fillStyle = '#fff';
+  polyPath(sctx, OVAL, w, h); sctx.fill();
+  sctx.globalCompositeOperation = 'destination-out';
+  for(const g of [EYE_L, EYE_R, LIPS]){ polyPath(sctx, g, w, h, centroid(g), 1.35); sctx.fill(); }
+  for(const g of [BROW_L, BROW_R]){ polyPath(sctx, g, w, h, centroid(g), 1.25); sctx.fill(); }
+
+  const eye = mk(), ectx = eye.getContext('2d');
+  ectx.filter = `blur(${Math.max(2,feather*0.7)}px)`;
+  ectx.fillStyle = '#fff';
+  for(const g of [EYE_L, EYE_R]){ polyPath(ectx, g, w, h, centroid(g), 1.15); ectx.fill(); }
+
+  // 法令纹带：鼻翼→嘴角的粗圆头线，稍向脸颊侧偏移
+  const fold = mk(), fctx = fold.getContext('2d');
+  fctx.filter = `blur(${Math.max(2,feather)}px)`;
+  fctx.strokeStyle = '#fff'; fctx.lineCap = 'round';
+  fctx.lineWidth = Math.max(4, faceW*0.055/2);
+  const latOff = dist2(pt(234),pt(454)) * 0.015; // 归一化脸宽的 1.5%
+  // 双描：大模糊铺软边 + 小模糊提芯部浓度（单次模糊会把峰值稀释到 ~0.55）
+  for(const blurK of [1, 0.45]){
+    fctx.filter = `blur(${Math.max(2,feather*blurK)}px)`;
+    for(const [wing,corner,side] of [[98,61,-1],[327,291,1]]){
+      const a = pt(wing), b = pt(corner);
+      const dxn = b.x-a.x, dyn = b.y-a.y, ox = side*latOff;
+      fctx.beginPath();
+      fctx.moveTo((a.x - dxn*0.12 + ox)*w, (a.y - dyn*0.12)*h);
+      fctx.lineTo((b.x + dxn*0.10 + ox)*w, (b.y + dyn*0.10)*h);
+      fctx.stroke();
+    }
+  }
+
+  const out = mk(), octx = out.getContext('2d');
+  const sd = sctx.getImageData(0,0,w,h).data, ed = ectx.getImageData(0,0,w,h).data;
+  const fd = fctx.getImageData(0,0,w,h).data;
+  const od = octx.createImageData(w,h);
+  for(let i=0;i<sd.length;i+=4){
+    od.data[i]   = sd[i+3];   // R: 皮肤
+    od.data[i+1] = ed[i+3];   // G: 眼睛
+    od.data[i+2] = fd[i+3];   // B: 法令纹带
+    od.data[i+3] = 255;
+  }
+  octx.putImageData(od,0,0);
+  window.__ketuMask = out; // debug hook
+  return out;
+}
+
+/* ---------- 变形参数（瘦脸/大眼/瘦鼻 → shader 的 op 列表） ---------- */
+function buildOps(){
+  const ops = [];
+  if(!faceOK) return ops;
+  const asp = imgW/imgH;
+  const A = p => ({x:p.x*asp, y:p.y});          // 纵横比修正空间
+  const faceW = Math.hypot((pt(234).x-pt(454).x)*asp, pt(234).y-pt(454).y);
+  const mouth = A(pt(13)), noseTip = A(pt(4));
+
+  // 瘦脸：下颌两侧各两点往嘴部推
+  if(params.slim>0){
+    const s = params.slim/100 * 0.13;
+    for(const i of [172,136,150, 397,365,379]){
+      const p = A(pt(i));
+      const dx = mouth.x-p.x, dy = mouth.y-p.y, d = Math.hypot(dx,dy)||1;
+      ops.push({cx:p.x, cy:p.y, r:faceW*0.28, s:s*0.55, dirx:dx/d, diry:dy/d, type:0});
+    }
+  }
+  // 收颊：中脸颊（苹果肌下缘）往鼻中轴水平收，和瘦脸（下颌）分开管
+  if(params.cheek>0){
+    const s = params.cheek/100 * 0.135;
+    for(const i of [50,205, 280,425]){
+      const p = A(pt(i));
+      const dx = noseTip.x - p.x, dy = 0.03, d = Math.hypot(dx,dy)||1;
+      ops.push({cx:p.x, cy:p.y, r:faceW*0.26, s:s*0.5, dirx:dx/d, diry:dy/d, type:0});
+    }
+  }
+  // 大眼：径向放大
+  if(params.eye>0){
+    const s = params.eye/100 * 0.22;
+    for(const [ring,o,inn] of [[EYE_L,33,133],[EYE_R,263,362]]){
+      const c = centroid(ring), cc = A(c);
+      const r = Math.hypot((pt(o).x-pt(inn).x)*asp, pt(o).y-pt(inn).y) * 1.15;
+      ops.push({cx:cc.x, cy:cc.y, r, s, dirx:0, diry:0, type:1});
+    }
+  }
+  // 瘦鼻：鼻翼往中轴推
+  if(params.nose>0){
+    const s = params.nose/100 * 0.14;
+    const wl = A(pt(98)), wr = A(pt(327));
+    const noseW = Math.hypot(wl.x-wr.x, wl.y-wr.y);
+    for(const [p,other] of [[wl,wr],[wr,wl]]){
+      const dx = (other.x-p.x), d = Math.abs(dx)||1;
+      ops.push({cx:p.x, cy:p.y, r:noseW*1.05, s, dirx:dx/d, diry:0, type:0});
+    }
+  }
+  return ops.slice(0,16);
+}
+
+/* ---------- WebGL ---------- */
+const VS = `
+attribute vec2 aUV; varying vec2 vUV; uniform float uFlipY;
+void main(){ vUV=aUV; float py=aUV.y*2.0-1.0; if(uFlipY>0.5) py=-py;
+  gl_Position=vec4(aUV.x*2.0-1.0, py, 0.0, 1.0); }`;
+
+const FS_BLUR = `
+precision highp float; varying vec2 vUV;
+uniform sampler2D uTex; uniform vec2 uDir; uniform float uOff[7]; uniform float uWt[7];
+void main(){
+  vec3 c = texture2D(uTex,vUV).rgb*uWt[0];
+  for(int i=1;i<7;i++){
+    c += texture2D(uTex, vUV + uDir*uOff[i]).rgb*uWt[i];
+    c += texture2D(uTex, vUV - uDir*uOff[i]).rgb*uWt[i];
+  }
+  gl_FragColor = vec4(c,1.0);
+}`;
+
+const FS_MAIN = `
+precision highp float; varying vec2 vUV;
+uniform sampler2D uImg, uBlur, uMask;
+uniform vec2 uRes;
+uniform int uOpCount;
+uniform vec4 uOpA[16]; // cx, cy, r, s   (纵横比修正空间)
+uniform vec4 uOpB[16]; // dirx, diry, type, 0
+uniform float uSmooth, uWhiten, uBright, uFold;
+uniform vec2 uFoldO0, uFoldO1; // 两条沟的法向偏移（uv 空间）
+uniform float uFoldSplit;      // 左右分界 x
+uniform vec4 uG1; // exposure, contrast, saturation, temp
+uniform vec2 uG2; // tint, fade
+
+vec2 warp(vec2 p){
+  vec2 asp = vec2(uRes.x/uRes.y, 1.0);
+  vec2 q = p*asp;
+  for(int i=0;i<16;i++){
+    if(i>=uOpCount) break;
+    vec2 c = uOpA[i].xy;
+    float r = uOpA[i].z, s = uOpA[i].w;
+    float d = distance(q,c);
+    if(d<r){
+      float t = 1.0-d/r;
+      float fall = t*t*(3.0-2.0*t);
+      if(uOpB[i].z<0.5){ q -= uOpB[i].xy*(s*r)*fall; }
+      else { q = c + (q-c)*(1.0 - s*fall); }
+    }
+  }
+  return q/asp;
+}
+void main(){
+  vec2 uv = clamp(warp(vUV), 0.0, 1.0);
+  vec3 col = texture2D(uImg, uv).rgb;
+  vec3 blur = texture2D(uBlur, uv).rgb;
+  vec4 m = texture2D(uMask, uv);
+  // 磨皮：边缘保护 + 回贴一点细节
+  float diff = length(col-blur);
+  float keep = 1.0 - smoothstep(0.09, 0.28, diff);
+  vec3 sm = mix(col, blur, uSmooth*m.r*keep);
+  sm += (col-blur)*0.22*uSmooth*m.r;
+  col = sm;
+  // 法令纹：参考色从沟两侧的干净皮肤采（深沟会把原地局部平均拉暗，侧采不受污染），
+  // 只提暗部保纹理；增益 1.35 补遮罩软边损耗
+  if(uFold > 0.001){
+    vec2 fo = uv.x < uFoldSplit ? uFoldO0 : uFoldO1;
+    vec3 sideRef = max(texture2D(uBlur, uv+fo).rgb, texture2D(uBlur, uv-fo).rgb);
+    vec3 fref = max(blur*1.03, sideRef*0.97);
+    col = mix(col, max(col, fref), clamp(uFold*m.b*1.35, 0.0, 1.0));
+  }
+  // 美白：皮肤为主、全局微量
+  col = 1.0 - (1.0-col)*(1.0 - uWhiten*(0.26*m.r + 0.05));
+  // 亮眼
+  col *= 1.0 + uBright*m.g*0.35;
+  // 调色
+  col *= pow(2.0, uG1.x);
+  col = (col-0.5)*uG1.y + 0.5;
+  float l = dot(col, vec3(0.299,0.587,0.114));
+  col = mix(vec3(l), col, uG1.z);
+  col += vec3(uG1.w, uG2.x*0.5, -uG1.w)*0.08;
+  col = mix(col, col*0.90+0.085, uG2.y);
+  gl_FragColor = vec4(clamp(col,0.0,1.0), 1.0);
+}`;
+
+function compile(type, src){
+  const sh = gl.createShader(type); gl.shaderSource(sh,src); gl.compileShader(sh);
+  if(!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(sh));
+  return sh;
+}
+function program(fs){
+  const p = gl.createProgram();
+  gl.attachShader(p, compile(gl.VERTEX_SHADER, VS));
+  gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(p);
+  if(!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  return p;
+}
+function mkTex(w,h){
+  const t = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  if(w) gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,w,h,0,gl.RGBA,gl.UNSIGNED_BYTE,null);
+  return t;
+}
+function initGL(){
+  gl = glCanvas.getContext('webgl', {preserveDrawingBuffer:true});
+  if(!gl){ toast('这设备不支持 WebGL，开不了工 😢', 6000); return false; }
+  progMain = program(FS_MAIN);
+  progBlur = program(FS_BLUR);
+  quadBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0,0, 2,0, 0,2]), gl.STATIC_DRAW);
+  return true;
+}
+function bindQuad(p){
+  const loc = gl.getAttribLocation(p,'aUV');
+  gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+}
+const U = (p,n) => gl.getUniformLocation(p,n);
+
+function setupTextures(srcCanvas, maskCanvas){
+  for(const t of [texImg,texBlur,texBlurA,texMask]) if(t) gl.deleteTexture(t);
+  for(const f of [fboBlurA,fboBlurB]) if(f) gl.deleteFramebuffer(f);
+
+  texImg = mkTex();
+  gl.bindTexture(gl.TEXTURE_2D, texImg);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,srcCanvas);
+
+  texMask = mkTex();
+  gl.bindTexture(gl.TEXTURE_2D, texMask);
+  if(maskCanvas) gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,maskCanvas);
+  else gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,1,1,0,gl.RGBA,gl.UNSIGNED_BYTE,new Uint8Array([0,0,0,255]));
+
+  // 半分辨率两趟高斯 → texBlur
+  const bw = Math.round(imgW/2), bh = Math.round(imgH/2);
+  texBlurA = mkTex(bw,bh); texBlur = mkTex(bw,bh);
+  fboBlurA = gl.createFramebuffer(); fboBlurB = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fboBlurA);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texBlurA, 0);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fboBlurB);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texBlur, 0);
+
+  // sigma 跟脸宽走
+  let sigma = 8;
+  if(faceOK){
+    const eyeDist = dist2(centroid(EYE_L), centroid(EYE_R)) * imgW;
+    sigma = Math.min(30, Math.max(5, eyeDist*0.11)) / 2; // 半分辨率尺度
+  }
+  const offs=[0], wts=[Math.exp(0)];
+  for(let i=1;i<7;i++){ offs.push(i*sigma/2.2); wts.push(Math.exp(-0.5*Math.pow(offs[i]/sigma,2))); }
+  let sum = wts[0]; for(let i=1;i<7;i++) sum += 2*wts[i];
+  for(let i=0;i<7;i++) wts[i]/=sum;
+
+  gl.useProgram(progBlur); bindQuad(progBlur);
+  gl.uniform1fv(U(progBlur,'uOff[0]'), offs.map((o,i)=>i?o:0));
+  gl.uniform1fv(U(progBlur,'uWt[0]'), wts);
+  gl.uniform1f(U(progBlur,'uFlipY'), 0);
+  gl.viewport(0,0,bw,bh);
+  // 横向：img → A
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fboBlurA);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, texImg);
+  gl.uniform1i(U(progBlur,'uTex'),0);
+  gl.uniform2f(U(progBlur,'uDir'), 1/bw, 0);
+  gl.drawArrays(gl.TRIANGLES,0,3);
+  // 纵向：A → blur
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fboBlurB);
+  gl.bindTexture(gl.TEXTURE_2D, texBlurA);
+  gl.uniform2f(U(progBlur,'uDir'), 0, 1/bh);
+  gl.drawArrays(gl.TRIANGLES,0,3);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+}
+
+let rafPending = false;
+function requestRender(){
+  if(rafPending) return; rafPending = true;
+  requestAnimationFrame(()=>{ rafPending=false; render(); });
+}
+function render(){
+  if(!gl || !imgW) return;
+  gl.viewport(0,0,imgW,imgH);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.useProgram(progMain); bindQuad(progMain);
+  gl.uniform1f(U(progMain,'uFlipY'), 1);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, texImg);  gl.uniform1i(U(progMain,'uImg'),0);
+  gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, texBlur); gl.uniform1i(U(progMain,'uBlur'),1);
+  gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, texMask); gl.uniform1i(U(progMain,'uMask'),2);
+  gl.uniform2f(U(progMain,'uRes'), imgW, imgH);
+
+  const neutral = compare;
+  const ops = neutral ? [] : buildOps();
+  gl.uniform1i(U(progMain,'uOpCount'), ops.length);
+  const A = new Float32Array(64), B = new Float32Array(64);
+  ops.forEach((o,i)=>{ A.set([o.cx,o.cy,o.r,o.s],i*4); B.set([o.dirx,o.diry,o.type,0],i*4); });
+  gl.uniform4fv(U(progMain,'uOpA[0]'), A);
+  gl.uniform4fv(U(progMain,'uOpB[0]'), B);
+  gl.uniform1f(U(progMain,'uSmooth'), neutral?0:params.smooth/100);
+  gl.uniform1f(U(progMain,'uWhiten'), neutral?0:params.whiten/100);
+  gl.uniform1f(U(progMain,'uBright'), neutral?0:params.bright/100);
+  gl.uniform1f(U(progMain,'uFold'), neutral?0:params.fold/100);
+  gl.uniform2f(U(progMain,'uFoldO0'), foldU.o0[0], foldU.o0[1]);
+  gl.uniform2f(U(progMain,'uFoldO1'), foldU.o1[0], foldU.o1[1]);
+  gl.uniform1f(U(progMain,'uFoldSplit'), foldU.split);
+  const g = neutral ? FILTERS[0].g : FILTERS[filterIdx].g;
+  gl.uniform4f(U(progMain,'uG1'), g[0],g[1],g[2],g[3]);
+  gl.uniform2f(U(progMain,'uG2'), g[4],g[5]);
+  gl.drawArrays(gl.TRIANGLES,0,3);
+}
+
+/* ---------- 载图 ---------- */
+async function loadFile(file){
+  let bmp;
+  try{ bmp = await createImageBitmap(file, {imageOrientation:'from-image'}); }
+  catch{ toast('这张格式读不出来，换张 JPG/PNG 试试'); return; }
+  const MAX = 2048;
+  const k = Math.min(1, MAX/Math.max(bmp.width,bmp.height));
+  imgW = Math.round(bmp.width*k); imgH = Math.round(bmp.height*k);
+  const src = document.createElement('canvas');
+  src.width=imgW; src.height=imgH;
+  src.getContext('2d').drawImage(bmp,0,0,imgW,imgH);
+  bmp.close();
+
+  landmarks = null; faceOK = false;
+  if(landmarker){
+    try{
+      const res = landmarker.detect(src);
+      if(res.faceLandmarks && res.faceLandmarks.length){
+        landmarks = res.faceLandmarks[0]; faceOK = true;
+      }
+    }catch(e){ console.error('[ketu] detect failed', e); }
+  }
+
+  if(faceOK){
+    // 法令纹侧采样偏移：垂直于沟走向、约 1.2 倍半带宽（uv 空间）
+    const asp = imgW/imgH;
+    const mkOff = (wing,corner)=>{
+      let dx = (pt(corner).x-pt(wing).x)*asp, dy = pt(corner).y-pt(wing).y;
+      const L = Math.hypot(dx,dy)||1; dx/=L; dy/=L;
+      const wHalf = dist2(pt(234),pt(454))*asp * 0.042;
+      return [ -dy*wHalf/asp, dx*wHalf ];
+    };
+    foldU = { o0:mkOff(98,61), o1:mkOff(327,291), split:pt(4).x };
+  }
+
+  glCanvas.width = imgW; glCanvas.height = imgH;
+  if(!gl && !initGL()) return;
+  setupTextures(src, faceOK ? buildMaskCanvas() : null);
+  view = {k:1, tx:0, ty:0}; applyView();
+
+  drop.hidden = true; glCanvas.hidden = false;
+  $('#panel').hidden = false; $('#stageHint').hidden = false;
+  // 没脸：磨皮/瘦脸/大眼/瘦鼻/亮眼全禁用，只留美白+滤镜
+  for(const id of ['smooth','fold','slim','cheek','eye','nose','bright']) $('#s-'+id).disabled = !faceOK;
+  if(!faceOK) toast('没认出人脸——滤镜和美白还能用，变形类先歇着');
+  requestRender();
+}
+
+/* ---------- 保存 ---------- */
+async function doSave(){
+  if(!imgW) return;
+  compare = false; render(); // 确保 buffer 是当前效果
+  const blob = await new Promise(r => glCanvas.toBlob(r, 'image/jpeg', 0.92));
+  if(!blob){ toast('导出失败了'); return; }
+  const name = 'ketu-' + new Date().toISOString().slice(5,16).replace(/[-:T]/g,'') + '.jpg';
+  if(downloadsNS === undefined){
+    try{ downloadsNS = window.claude?.use ? await window.claude.use('downloads') : null; }
+    catch{ downloadsNS = null; }
+  }
+  if(downloadsNS){
+    try{ await downloadsNS.save({filename:name, data:blob}); toast('已保存 ✓'); return; }
+    catch(e){ if(e && e.code==='declined') return; /* 其余走兜底 */ }
+  }
+  // 真浏览器（GitHub Pages / 本地）：直接触发下载
+  if(!window.claude){
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 10000);
+    toast('已保存到下载/相册 ✓');
+    return;
+  }
+  // 兜底：长按/右键保存
+  const url = URL.createObjectURL(blob);
+  const ov = document.createElement('div'); ov.id='saveOverlay';
+  ov.innerHTML = `<p>手机长按图片保存到相册，电脑右键另存为</p><img alt="修好的图"><button class="hbtn">关闭</button>`;
+  ov.querySelector('img').src = url;
+  ov.querySelector('button').onclick = ()=>{ URL.revokeObjectURL(url); ov.remove(); };
+  document.body.appendChild(ov);
+}
+
+/* ---------- UI 事件 ---------- */
+$('#btnPick').onclick = $('#btnNew').onclick = () => $('#file').click();
+$('#file').onchange = e => { if(e.target.files[0]) loadFile(e.target.files[0]); e.target.value=''; };
+stage.addEventListener('dragover', e=>e.preventDefault());
+stage.addEventListener('drop', e=>{ e.preventDefault(); const f=e.dataTransfer.files[0]; if(f) loadFile(f); });
+
+for(const key of Object.keys(params)){
+  const el = $('#s-'+key);
+  el.addEventListener('input', ()=>{
+    params[key] = +el.value;
+    el.parentElement.querySelector('output').textContent = el.value;
+    requestRender();
+  });
+}
+function setSliders(vals){
+  for(const [k,v] of Object.entries(vals)){
+    params[k]=v; const el=$('#s-'+k); el.value=v;
+    el.parentElement.querySelector('output').textContent=v;
+  }
+  requestRender();
+}
+$('#btnAuto').onclick = ()=> setSliders({smooth:55,whiten:35,fold:35,slim:25,cheek:20,eye:18,nose:15,bright:25});
+$('#btnZero').onclick = ()=> setSliders({smooth:0,whiten:0,fold:0,slim:0,cheek:0,eye:0,nose:0,bright:0});
+$('#btnReset').onclick = ()=>{ setSliders({smooth:30,whiten:20,fold:0,slim:0,cheek:0,eye:0,nose:0,bright:0}); setFilter(0); };
+
+const cmp = $('#btnCompare');
+for(const ev of ['pointerdown']) cmp.addEventListener(ev, e=>{e.preventDefault(); compare=true; requestRender();});
+for(const ev of ['pointerup','pointerleave','pointercancel']) cmp.addEventListener(ev, ()=>{ compare=false; requestRender(); });
+
+$('#btnSave').onclick = doSave;
+
+/* ---------- 画布缩放/平移（只动图，不动工具条） ---------- */
+let view = {k:1, tx:0, ty:0};
+function stageCenter(){ const r = stage.getBoundingClientRect(); return {x:r.left+r.width/2, y:r.top+r.height/2}; }
+function applyView(){
+  view.k = Math.min(8, Math.max(1, view.k));
+  if(view.k===1){ view.tx=0; view.ty=0; }
+  const bx = glCanvas.clientWidth*view.k/2, by = glCanvas.clientHeight*view.k/2;
+  view.tx = Math.max(-bx, Math.min(bx, view.tx));
+  view.ty = Math.max(-by, Math.min(by, view.ty));
+  glCanvas.style.transform = `translate(${view.tx}px, ${view.ty}px) scale(${view.k})`;
+}
+// 锚点缩放：让手指/鼠标下的那块图保持在原处
+function zoomAt(k2, cx, cy){
+  k2 = Math.min(8, Math.max(1, k2));
+  const sc = stageCenter(), px = cx-sc.x, py = cy-sc.y, s = k2/view.k;
+  view.tx = px - (px-view.tx)*s;
+  view.ty = py - (py-view.ty)*s;
+  view.k = k2; applyView();
+}
+const ptrs = new Map();
+let gest = null;
+stage.addEventListener('pointerdown', e=>{
+  if(!imgW || e.target.closest('button')) return;
+  ptrs.set(e.pointerId, {x:e.clientX, y:e.clientY});
+  if(ptrs.size===1) gest = {t:'pan', x:e.clientX, y:e.clientY, tx:view.tx, ty:view.ty};
+  else if(ptrs.size===2){
+    const [p1,p2] = [...ptrs.values()];
+    gest = {t:'pinch', d0:Math.hypot(p1.x-p2.x,p1.y-p2.y)||1,
+      c0:{x:(p1.x+p2.x)/2, y:(p1.y+p2.y)/2}, k0:view.k, tx0:view.tx, ty0:view.ty};
+  }
+});
+stage.addEventListener('pointermove', e=>{
+  if(!ptrs.has(e.pointerId)) return;
+  ptrs.set(e.pointerId, {x:e.clientX, y:e.clientY});
+  if(gest && gest.t==='pan' && ptrs.size===1 && view.k>1){
+    view.tx = gest.tx + (e.clientX-gest.x);
+    view.ty = gest.ty + (e.clientY-gest.y);
+    applyView();
+  } else if(gest && gest.t==='pinch' && ptrs.size===2){
+    const [p1,p2] = [...ptrs.values()];
+    const d = Math.hypot(p1.x-p2.x, p1.y-p2.y)||1;
+    const c = {x:(p1.x+p2.x)/2, y:(p1.y+p2.y)/2};
+    const k2 = Math.min(8, Math.max(1, gest.k0 * d/gest.d0));
+    const sc = stageCenter();
+    // 初始捏合中心下的图像点，缩放后仍停在当前中心下
+    const ux = (gest.c0.x - sc.x - gest.tx0), uy = (gest.c0.y - sc.y - gest.ty0);
+    view.tx = (c.x - sc.x) - ux*(k2/gest.k0);
+    view.ty = (c.y - sc.y) - uy*(k2/gest.k0);
+    view.k = k2; applyView();
+  }
+});
+for(const ev of ['pointerup','pointercancel','pointerleave']) stage.addEventListener(ev, e=>{
+  if(!ptrs.has(e.pointerId)) return;
+  ptrs.delete(e.pointerId);
+  if(ptrs.size===1){ const [p] = [...ptrs.values()]; gest = {t:'pan', x:p.x, y:p.y, tx:view.tx, ty:view.ty}; }
+  else if(ptrs.size===0) gest = null;
+});
+stage.addEventListener('wheel', e=>{
+  if(!imgW) return; e.preventDefault();
+  zoomAt(view.k * Math.exp(-e.deltaY*0.0022), e.clientX, e.clientY);
+}, {passive:false});
+stage.addEventListener('dblclick', e=>{
+  if(!imgW) return;
+  if(view.k>1){ view.k=1; applyView(); }
+  else zoomAt(2.5, e.clientX, e.clientY);
+});
+
+document.querySelectorAll('.tab').forEach(t=>{
+  t.onclick = ()=>{
+    document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('on', x===t));
+    $('#pane-beauty').hidden = t.dataset.pane!=='beauty';
+    $('#pane-filter').hidden = t.dataset.pane!=='filter';
+  };
+});
+
+const filtersBox = $('#filters');
+FILTERS.forEach((f,i)=>{
+  const b = document.createElement('button');
+  b.className = 'fchip' + (i===0?' on':'');
+  b.innerHTML = `<div class="dot"></div><span>${f.name}</span>`;
+  // 小色卡示意
+  const hue = [ 'linear-gradient(135deg,#8a7a68,#5c5248)',
+    'linear-gradient(135deg,#e8c9a8,#c9a183)','linear-gradient(135deg,#dfe3ea,#aab4c4)',
+    'linear-gradient(135deg,#cfd8c2,#98a28c)','linear-gradient(135deg,#f0b8ab,#d98f88)',
+    'linear-gradient(135deg,#cfcfcf,#5a5a5a)'][i];
+  b.querySelector('.dot').style.background = hue;
+  b.onclick = ()=> setFilter(i);
+  filtersBox.appendChild(b);
+});
+function setFilter(i){
+  filterIdx = i;
+  filtersBox.querySelectorAll('.fchip').forEach((x,n)=>x.classList.toggle('on', n===i));
+  requestRender();
+}
+
+window.__ketuRender = render; window.__ketuParams = params; // debug hooks
+// PWA：真浏览器环境注册 service worker（离线可用）；artifact 里跳过
+if(!window.claude && 'serviceWorker' in navigator && location.protocol === 'https:'){
+  navigator.serviceWorker.register('sw.js').catch(()=>{});
+}
+initLandmarker();
+</script>
+<!-- DEV-SKELETON-TAIL-START -->
+</body>
+</html>
+<!-- DEV-SKELETON-TAIL-END -->

@@ -1,0 +1,5 @@
+dist/
+.DS_Store
+test_face*.jpg
+my_test.jpg
+*.psd

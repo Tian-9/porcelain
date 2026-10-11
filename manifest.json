@@ -1,0 +1,15 @@
+{
+  "name": "克图",
+  "short_name": "克图",
+  "description": "本地美颜修图：磨皮、法令纹、瘦脸收颊，照片不上传",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#17130f",
+  "theme_color": "#17130f",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
