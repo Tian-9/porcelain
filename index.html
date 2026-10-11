@@ -176,6 +176,7 @@ const statusEl = $('#status'), toastEl = $('#toast');
 
 let landmarker = null, landmarks = null;
 let foldU = { o0:[0,0], o1:[0,0], split:0.5 };
+let skinRef = [0.78, 0.62, 0.54]; // 脸颊采样的肤色基准，美白按色度相似度扩散
 let gl, progMain, progBlur, quadBuf;
 let texImg, texBlur, texMask, fboBlurA, fboBlurB, texBlurA;
 let imgW = 0, imgH = 0, faceOK = false;
@@ -269,12 +270,15 @@ function buildMaskCanvas(){
 
   const mk = () => { const c=document.createElement('canvas'); c.width=w; c.height=h; return c; };
   const skin = mk(), sctx = skin.getContext('2d');
-  sctx.filter = `blur(${feather}px)`;
+  sctx.filter = `blur(${Math.max(4, faceW*0.05/2)}px)`;
   sctx.fillStyle = '#fff';
-  polyPath(sctx, OVAL, w, h); sctx.fill();
+  // 以下巴为锚放大 10%：FaceMesh 的椭圆额头线偏保守，高额头会被切出分界线
+  polyPath(sctx, OVAL, w, h, pt(152), 1.10); sctx.fill();
   sctx.globalCompositeOperation = 'destination-out';
-  for(const g of [EYE_L, EYE_R, LIPS]){ polyPath(sctx, g, w, h, centroid(g), 1.35); sctx.fill(); }
-  for(const g of [BROW_L, BROW_R]){ polyPath(sctx, g, w, h, centroid(g), 1.25); sctx.fill(); }
+  for(const g of [EYE_L, EYE_R]){ polyPath(sctx, g, w, h, centroid(g), 1.25); sctx.fill(); }
+  // 唇/眉挖除只留本体，挖大了会在嘴周/眉周留下没吃到美白的色块
+  polyPath(sctx, LIPS, w, h, centroid(LIPS), 1.12); sctx.fill();
+  for(const g of [BROW_L, BROW_R]){ polyPath(sctx, g, w, h, centroid(g), 1.12); sctx.fill(); }
 
   const eye = mk(), ectx = eye.getContext('2d');
   ectx.filter = `blur(${Math.max(2,feather*0.7)}px)`;
@@ -390,6 +394,7 @@ uniform int uOpCount;
 uniform vec4 uOpA[16]; // cx, cy, r, s   (纵横比修正空间)
 uniform vec4 uOpB[16]; // dirx, diry, type, 0
 uniform float uSmooth, uWhiten, uBright, uFold;
+uniform vec3 uSkin;            // 脸颊肤色基准
 uniform vec2 uFoldO0, uFoldO1; // 两条沟的法向偏移（uv 空间）
 uniform float uFoldSplit;      // 左右分界 x
 uniform vec4 uG1; // exposure, contrast, saturation, temp
@@ -431,8 +436,15 @@ void main(){
     vec3 fref = max(blur*1.03, sideRef*0.97);
     col = mix(col, max(col, fref), clamp(uFold*m.b*1.35, 0.0, 1.0));
   }
-  // 美白：皮肤为主、全局微量
-  col = 1.0 - (1.0-col)*(1.0 - uWhiten*(0.26*m.r + 0.05));
+  // 美白：不只认多边形模板（高额头/耳朵/脖子会被切出分界线），
+  // 改按肤色相似度扩散——色度接近脸颊基准就吃美白，头发背景自然排除
+  float lum = dot(col, vec3(0.299,0.587,0.114));
+  float slum = dot(uSkin, vec3(0.299,0.587,0.114));
+  vec3 chroma = col - lum, schroma = uSkin - slum;
+  float cd = length(chroma - schroma);
+  float lumGate = smoothstep(slum*0.35, slum*0.7, lum);
+  float skinness = max(m.r, (1.0 - smoothstep(0.07, 0.20, cd)) * lumGate);
+  col = 1.0 - (1.0-col)*(1.0 - uWhiten*(0.24*skinness + 0.04));
   // 亮眼
   col *= 1.0 + uBright*m.g*0.35;
   // 调色
@@ -568,6 +580,7 @@ function render(){
   gl.uniform2f(U(progMain,'uFoldO0'), foldU.o0[0], foldU.o0[1]);
   gl.uniform2f(U(progMain,'uFoldO1'), foldU.o1[0], foldU.o1[1]);
   gl.uniform1f(U(progMain,'uFoldSplit'), foldU.split);
+  gl.uniform3f(U(progMain,'uSkin'), skinRef[0], skinRef[1], skinRef[2]);
   const g = neutral ? FILTERS[0].g : FILTERS[filterIdx].g;
   gl.uniform4f(U(progMain,'uG1'), g[0],g[1],g[2],g[3]);
   gl.uniform2f(U(progMain,'uG2'), g[4],g[5]);
@@ -598,6 +611,16 @@ async function loadFile(file){
   }
 
   if(faceOK){
+    // 肤色基准：两颊 + 额心各采一小块，取平均
+    const sctx2 = src.getContext('2d');
+    let acc = [0,0,0], n = 0;
+    for(const i of [50, 280, 9]){
+      const px = Math.round(pt(i).x*imgW), py = Math.round(pt(i).y*imgH);
+      const d = sctx2.getImageData(Math.max(0,px-3), Math.max(0,py-3), 6, 6).data;
+      for(let j=0;j<d.length;j+=4){ acc[0]+=d[j]; acc[1]+=d[j+1]; acc[2]+=d[j+2]; n++; }
+    }
+    skinRef = acc.map(v => v/n/255);
+
     // 法令纹侧采样偏移：垂直于沟走向、约 1.2 倍半带宽（uv 空间）
     const asp = imgW/imgH;
     const mkOff = (wing,corner)=>{

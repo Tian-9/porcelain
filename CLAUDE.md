@@ -33,7 +33,7 @@ Single-file browser app: all logic lives in `index.html`. No build step, no depe
 | fold gain | `FS_MAIN`: `clamp(uFold*m.b*1.35, …)` | 1.35 | 1.0–1.8 |
 | fold side-sample distance | `loadFile()` `mkOff`: `* 0.042` | 0.042 | 0.03–0.06 |
 | filters | `FILTERS` array: `[exposure(stops), contrast, saturation, temp, tint, fade]` | 6 presets | add entries + a gradient swatch in the chip builder |
-| whitening | `FS_MAIN`: `uWhiten*(0.26*m.r + 0.05)` | — | keep global term ≤ 0.08 |
+| whitening | `FS_MAIN`: chroma-similarity `skinness` (ref `uSkin` sampled from cheeks/forehead in `loadFile`), `uWhiten*(0.24*skinness + 0.04)` | `smoothstep(0.07, 0.20, cd)` | widen 0.20→0.26 if skin is missed; never bind whitening to the polygon mask alone — high foreheads get a visible seam |
 
 Adding a slider: markup `.srow` with id `s-<key>` → add key to `params` → consume in `buildOps()` (warp) or as a shader uniform (color) → add to the auto/zero/reset presets and the no-face disable list → English label in the i18n block.
 
