@@ -1,5 +1,5 @@
 // Porcelain service worker: precache all assets, cache-first → works offline after first load
-const CACHE = 'porcelain-v2';
+const CACHE = 'porcelain-v3';
 const ASSETS = [
   './',
   './index.html',

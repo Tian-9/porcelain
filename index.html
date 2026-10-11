@@ -158,6 +158,7 @@ header .spacer{flex:1}
       <div class="srow"><label>大眼</label><input type="range" id="s-eye"    min="0" max="100" value="0"><output>0</output></div>
       <div class="srow"><label>瘦鼻</label><input type="range" id="s-nose"   min="0" max="100" value="0"><output>0</output></div>
       <div class="srow"><label>亮眼</label><input type="range" id="s-bright" min="0" max="100" value="0"><output>0</output></div>
+      <div class="srow"><label>发际线</label><input type="range" id="s-hair" min="0" max="100" value="0"><output>0</output></div>
     </div>
     <div class="pane" id="pane-filter" hidden>
       <div id="filters"></div>
@@ -177,12 +178,13 @@ const statusEl = $('#status'), toastEl = $('#toast');
 let landmarker = null, landmarks = null;
 let foldU = { o0:[0,0], o1:[0,0], split:0.5 };
 let skinRef = [0.78, 0.62, 0.54]; // 脸颊采样的肤色基准，美白按色度相似度扩散
+let hairRef = [0.08, 0.07, 0.06], hairMaskCanvas = null, hairOK = false; // 发际线带
 let gl, progMain, progBlur, quadBuf;
-let texImg, texBlur, texMask, fboBlurA, fboBlurB, texBlurA;
+let texImg, texBlur, texMask, texHair, fboBlurA, fboBlurB, texBlurA;
 let imgW = 0, imgH = 0, faceOK = false;
 let compare = false, downloadsNS = undefined; // undefined = 未探测
 
-const params = { smooth:30, whiten:20, fold:0, slim:0, cheek:0, eye:0, nose:0, bright:0 };
+const params = { smooth:30, whiten:20, fold:0, slim:0, cheek:0, eye:0, nose:0, bright:0, hair:0 };
 // 滤镜：exposure(档), contrast, saturation, temp, tint, fade —— 调性偏清透白皙，不走欧美蜜棕
 const FILTERS = [
   { name:'原片', en:'Original', g:[0,1,1,0,0,0] },
@@ -212,7 +214,7 @@ if(isZH){
   const T = { btnNew:'Photo', btnReset:'Reset', btnCompare:'Compare⌛', btnSave:'Save',
     btnPick:'Choose photo', btnAuto:'Quick glow-up', btnZero:'Zero all' };
   for(const [id,t] of Object.entries(T)) document.getElementById(id).textContent = t;
-  const labels = ['Smooth','Brighten','Smile lines','Slim jaw','Cheeks','Big eyes','Slim nose','Eye light'];
+  const labels = ['Smooth','Brighten','Smile lines','Slim jaw','Cheeks','Big eyes','Slim nose','Eye light','Hairline'];
   document.querySelectorAll('#pane-beauty .srow label').forEach((el,i)=>{ el.textContent = labels[i]; });
   const tabs = ['Beauty','Filters'];
   document.querySelectorAll('.tab').forEach((el,i)=>{ el.textContent = tabs[i]; });
@@ -319,6 +321,86 @@ function buildMaskCanvas(){
   return out;
 }
 
+/* ---------- 发际线检测：从眉毛向上逐列扫，肤色（色度基准）结束处=发际线 ---------- */
+function buildHairline(src){
+  hairMaskCanvas = null; hairOK = false;
+  const w = Math.round(imgW/2), h = Math.round(imgH/2);
+  const half = document.createElement('canvas'); half.width=w; half.height=h;
+  const hctx = half.getContext('2d');
+  hctx.drawImage(src, 0, 0, w, h);
+  const d = hctx.getImageData(0,0,w,h).data;
+
+  const sr = skinRef.map(v=>v*255);
+  const slum = 0.299*sr[0]+0.587*sr[1]+0.114*sr[2];
+  const scr = sr[0]-slum, scg = sr[1]-slum, scb = sr[2]-slum;
+  const isSkin = i => {
+    const r=d[i], g=d[i+1], b=d[i+2];
+    const lum = 0.299*r+0.587*g+0.114*b;
+    if(lum < slum*0.45) return false;
+    const cr=r-lum, cg=g-lum, cb=b-lum;
+    const cd = Math.hypot(cr-scr, cg-scg, cb-scb);
+    if(cd < 42) return true;
+    // 高光豁免：顶光打爆的额头色度归零，别误判成头发
+    return lum > slum*0.92 && Math.hypot(cr,cg,cb) < 30;
+  };
+
+  const faceWpx = dist2(pt(234),pt(454)) * imgW / 2;   // 半分辨率脸宽
+  const faceHpx = (pt(152).y - pt(10).y) * h;
+  const xL = Math.round(pt(234).x*w + faceWpx*0.06);
+  const xR = Math.round(pt(454).x*w - faceWpx*0.06);
+  const browY = Math.round(Math.min(pt(105).y, pt(334).y)*h) - 3;
+  const topLimit = Math.max(0, Math.round(pt(10).y*h - faceHpx*0.35));
+
+  const pts = []; const hairAcc=[0,0,0]; let hairN=0;
+  for(let x=xL; x<=xR; x+=2){
+    let run = 0, yHair = -1;
+    for(let y=browY; y>=topLimit; y--){
+      if(isSkin((y*w+x)*4)) run = 0;
+      else { run++; if(run>=4){ yHair = y+run; break; } }  // 连续4px非肤色才算头发，跳过碎发
+    }
+    if(yHair > 0){
+      pts.push([x, yHair]);
+      for(let y=yHair-10; y<=yHair-5; y++){
+        if(y<0) continue; const i=(y*w+x)*4;
+        const lum = 0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
+        if(lum < slum*0.55){ hairAcc[0]+=d[i]; hairAcc[1]+=d[i+1]; hairAcc[2]+=d[i+2]; hairN++; }
+      }
+    }
+  }
+  if(pts.length < 15) return;   // 发际线找不全（光头/帽子/刘海盖额）就禁用
+
+  // 列间中值平滑，压掉发丝毛刺
+  const ys = pts.map(p=>p[1]);
+  const smoothY = ys.map((_,i)=>{
+    const win = ys.slice(Math.max(0,i-4), i+5).slice().sort((a,b)=>a-b);
+    return win[Math.floor(win.length/2)];
+  });
+
+  if(hairN) hairRef = hairAcc.map(v=>v/hairN/255);
+  void smoothY; // 扫描线只用来判有效性和采发色；成带改用邻近场，碎发自然加厚、不会画出悬空带
+  const band = faceWpx * 0.055;
+  const c = document.createElement('canvas'); c.width=w; c.height=h;
+  const ctx = c.getContext('2d');
+  const id2 = ctx.createImageData(w,h);
+  for(let y=topLimit; y<=browY; y++){
+    for(let x=xL; x<=xR; x++){
+      const i=(y*w+x)*4;
+      const lum = 0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
+      if(lum < slum*0.5){ id2.data[i]=255; id2.data[i+3]=255; }
+    }
+  }
+  ctx.putImageData(id2,0,0);
+  const c2 = document.createElement('canvas'); c2.width=w; c2.height=h;
+  const ctx2 = c2.getContext('2d');
+  ctx2.filter = `blur(${Math.max(3, band*0.6)}px)`;
+  ctx2.drawImage(c,0,0);
+  ctx2.filter = `blur(${Math.max(2, band*0.25)}px)`;
+  ctx2.globalCompositeOperation = 'lighter';
+  ctx2.globalAlpha = 0.7;
+  ctx2.drawImage(c,0,0);
+  hairMaskCanvas = c2; hairOK = true;
+}
+
 /* ---------- 变形参数（瘦脸/大眼/瘦鼻 → shader 的 op 列表） ---------- */
 function buildOps(){
   const ops = [];
@@ -393,8 +475,10 @@ uniform vec2 uRes;
 uniform int uOpCount;
 uniform vec4 uOpA[16]; // cx, cy, r, s   (纵横比修正空间)
 uniform vec4 uOpB[16]; // dirx, diry, type, 0
-uniform float uSmooth, uWhiten, uBright, uFold;
+uniform float uSmooth, uWhiten, uBright, uFold, uHairline;
 uniform vec3 uSkin;            // 脸颊肤色基准
+uniform sampler2D uHairM;      // 发际线带
+uniform vec3 uHairC;           // 发色
 uniform vec2 uFoldO0, uFoldO1; // 两条沟的法向偏移（uv 空间）
 uniform float uFoldSplit;      // 左右分界 x
 uniform vec4 uG1; // exposure, contrast, saturation, temp
@@ -447,6 +531,17 @@ void main(){
   col = 1.0 - (1.0-col)*(1.0 - uWhiten*(0.24*skinness + 0.04));
   // 亮眼
   col *= 1.0 + uBright*m.g*0.35;
+  // 发际线粉：贴着发际把皮肤往发色压暗，竖条噪声仿碎发蓬松感。
+  // 乘 skinness 当闸门：墙(色度不符)和头发(太暗)都不吃，只刷皮肤
+  if(uHairline > 0.001){
+    float hm = texture2D(uHairM, uv).r;
+    if(hm > 0.004){
+      vec2 px = uv*uRes;
+      float n = fract(sin(dot(vec2(floor(px.x/3.0), floor(px.y/22.0)), vec2(12.9898,78.233)))*43758.5453);
+      float wgt = clamp(uHairline * hm * skinness * m.r * (0.3 + 0.7*n*n), 0.0, 1.0);
+      col = mix(col, uHairC*0.85, wgt*0.38);
+    }
+  }
   // 调色
   col *= pow(2.0, uG1.x);
   col = (col-0.5)*uG1.y + 0.5;
@@ -499,7 +594,7 @@ function bindQuad(p){
 const U = (p,n) => gl.getUniformLocation(p,n);
 
 function setupTextures(srcCanvas, maskCanvas){
-  for(const t of [texImg,texBlur,texBlurA,texMask]) if(t) gl.deleteTexture(t);
+  for(const t of [texImg,texBlur,texBlurA,texMask,texHair]) if(t) gl.deleteTexture(t);
   for(const f of [fboBlurA,fboBlurB]) if(f) gl.deleteFramebuffer(f);
 
   texImg = mkTex();
@@ -509,6 +604,11 @@ function setupTextures(srcCanvas, maskCanvas){
   texMask = mkTex();
   gl.bindTexture(gl.TEXTURE_2D, texMask);
   if(maskCanvas) gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,maskCanvas);
+  else gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,1,1,0,gl.RGBA,gl.UNSIGNED_BYTE,new Uint8Array([0,0,0,255]));
+
+  texHair = mkTex();
+  gl.bindTexture(gl.TEXTURE_2D, texHair);
+  if(hairMaskCanvas) gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,hairMaskCanvas);
   else gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,1,1,0,gl.RGBA,gl.UNSIGNED_BYTE,new Uint8Array([0,0,0,255]));
 
   // 半分辨率两趟高斯 → texBlur
@@ -564,6 +664,7 @@ function render(){
   gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, texImg);  gl.uniform1i(U(progMain,'uImg'),0);
   gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, texBlur); gl.uniform1i(U(progMain,'uBlur'),1);
   gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, texMask); gl.uniform1i(U(progMain,'uMask'),2);
+  gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, texHair); gl.uniform1i(U(progMain,'uHairM'),3);
   gl.uniform2f(U(progMain,'uRes'), imgW, imgH);
 
   const neutral = compare;
@@ -581,6 +682,8 @@ function render(){
   gl.uniform2f(U(progMain,'uFoldO1'), foldU.o1[0], foldU.o1[1]);
   gl.uniform1f(U(progMain,'uFoldSplit'), foldU.split);
   gl.uniform3f(U(progMain,'uSkin'), skinRef[0], skinRef[1], skinRef[2]);
+  gl.uniform1f(U(progMain,'uHairline'), neutral?0:params.hair/100);
+  gl.uniform3f(U(progMain,'uHairC'), hairRef[0], hairRef[1], hairRef[2]);
   const g = neutral ? FILTERS[0].g : FILTERS[filterIdx].g;
   gl.uniform4f(U(progMain,'uG1'), g[0],g[1],g[2],g[3]);
   gl.uniform2f(U(progMain,'uG2'), g[4],g[5]);
@@ -630,6 +733,7 @@ async function loadFile(file){
       return [ -dy*wHalf/asp, dx*wHalf ];
     };
     foldU = { o0:mkOff(98,61), o1:mkOff(327,291), split:pt(4).x };
+    buildHairline(src);
   }
 
   glCanvas.width = imgW; glCanvas.height = imgH;
@@ -641,6 +745,7 @@ async function loadFile(file){
   $('#panel').hidden = false; $('#stageHint').hidden = false;
   // 没脸：磨皮/瘦脸/大眼/瘦鼻/亮眼全禁用，只留美白+滤镜
   for(const id of ['smooth','fold','slim','cheek','eye','nose','bright']) $('#s-'+id).disabled = !faceOK;
+  $('#s-hair').disabled = !faceOK || !hairOK;
   if(!faceOK) toast(L('没认出人脸——滤镜和美白还能用，变形类先歇着','No face detected — filters still work, face tools are off'));
   requestRender();
 }
@@ -699,9 +804,9 @@ function setSliders(vals){
   }
   requestRender();
 }
-$('#btnAuto').onclick = ()=> setSliders({smooth:55,whiten:35,fold:35,slim:25,cheek:20,eye:18,nose:15,bright:25});
-$('#btnZero').onclick = ()=> setSliders({smooth:0,whiten:0,fold:0,slim:0,cheek:0,eye:0,nose:0,bright:0});
-$('#btnReset').onclick = ()=>{ setSliders({smooth:30,whiten:20,fold:0,slim:0,cheek:0,eye:0,nose:0,bright:0}); setFilter(0); };
+$('#btnAuto').onclick = ()=> setSliders({smooth:55,whiten:35,fold:35,slim:25,cheek:20,eye:18,nose:15,bright:25,hair:0});
+$('#btnZero').onclick = ()=> setSliders({smooth:0,whiten:0,fold:0,slim:0,cheek:0,eye:0,nose:0,bright:0,hair:0});
+$('#btnReset').onclick = ()=>{ setSliders({smooth:30,whiten:20,fold:0,slim:0,cheek:0,eye:0,nose:0,bright:0,hair:0}); setFilter(0); };
 
 const cmp = $('#btnCompare');
 for(const ev of ['pointerdown']) cmp.addEventListener(ev, e=>{e.preventDefault(); compare=true; requestRender();});
