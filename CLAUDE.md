@@ -9,7 +9,8 @@ Single-file browser app: all logic lives in `index.html`. No build step, no depe
 | `<style>` | Dark single-theme UI, tokens in `:root` |
 | markup | header actions / `#stage` (canvas + zoom gestures) / `#panel` (sliders + filters) |
 | i18n block | `isZH` detect; Chinese markup is the source, English applied as overrides |
-| `initLandmarker()` | MediaPipe Face Landmarker from `vendor/` (GPU, falls back to CPU) |
+| `initLandmarker()` | MediaPipe Face Landmarker + Image Segmenter (selfie multiclass) from `vendor/` (GPU→CPU fallback; segmenter failure degrades gracefully to polygon mode) |
+| `runSegment()` | per-pixel confidence masks: hair (1), body-skin (2), face-skin (3) — the authoritative "where is skin" answer; polygon+chroma heuristics remain as the no-model fallback |
 | landmark constants | `OVAL/EYE_L/EYE_R/BROW_*/LIPS` = MediaPipe FaceMesh indices |
 | `buildMaskCanvas()` | RGBA mask at half res: **R=skin, G=eyes, B=fold band** |
 | `buildOps()` | slider values → warp op list (push/zoom) for the shader |
@@ -55,7 +56,8 @@ Generate synthetic test portraits rather than using anyone's real photo. Verify 
 ## Gotchas
 
 - Shaders are WebGL1 GLSL; uniform arrays are fixed at 16 ops — bump both the GLSL `[16]`/loop bound and the JS `Float32Array(64)` together
-- The model file is named `face_landmarker.task.wasm` — the `.wasm` extension is a lie required by claude.ai artifact hosting; do not "fix" it
+- The model files are named `*.task.wasm` / `*.tflite.wasm` — the `.wasm` extension is a lie required by claude.ai artifact hosting; do not "fix" it
+- `selfie_multiclass.tflite.wasm` (15.6MB) exceeds the claude.ai artifact 15MB binary limit, so the artifact deployment runs WITHOUT it (polygon fallback). GitHub Pages is the full experience. Segmentation classes can scramble on iOS Safari GPU delegate (upstream bug) — if iOS matters, verify or force CPU
 - Bump `CACHE` in `sw.js` whenever any cached asset changes, or returning users get stale code
 - `DEV-SKELETON` comment blocks exist so the same file doubles as a claude.ai artifact (which injects its own skeleton); GitHub Pages serves the file as-is. Don't remove the markers
 - Keep Chinese as the source language in markup; English lives in the i18n override block

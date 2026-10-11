@@ -1,5 +1,5 @@
 // Porcelain service worker: precache all assets, cache-first → works offline after first load
-const CACHE = 'porcelain-v3';
+const CACHE = 'porcelain-v4';
 const ASSETS = [
   './',
   './index.html',
@@ -12,6 +12,7 @@ const ASSETS = [
   './vendor/wasm/vision_wasm_nosimd_internal.js',
   './vendor/wasm/vision_wasm_nosimd_internal.wasm',
   './vendor/face_landmarker.task.wasm',
+  './vendor/selfie_multiclass.tflite.wasm',
 ];
 
 self.addEventListener('install', e => {

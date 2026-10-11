@@ -169,13 +169,14 @@ header .spacer{flex:1}
 <input type="file" id="file" accept="image/*" hidden>
 
 <script type="module">
-import { FilesetResolver, FaceLandmarker } from './vendor/tasks_vision_bundle.mjs';
+import { FilesetResolver, FaceLandmarker, ImageSegmenter } from './vendor/tasks_vision_bundle.mjs';
 
 const $ = s => document.querySelector(s);
 const stage = $('#stage'), glCanvas = $('#gl'), drop = $('#drop');
 const statusEl = $('#status'), toastEl = $('#toast');
 
 let landmarker = null, landmarks = null;
+let segmenter = null, segOK = false; // 人像分割：有模型用模型，没有退回多边形+肤色启发式
 let foldU = { o0:[0,0], o1:[0,0], split:0.5 };
 let skinRef = [0.78, 0.62, 0.54]; // 脸颊采样的肤色基准，美白按色度相似度扩散
 let hairRef = [0.08, 0.07, 0.06], hairMaskCanvas = null, hairOK = false; // 发际线带
@@ -233,6 +234,15 @@ async function initLandmarker(){
     });
     try{ landmarker = await FaceLandmarker.createFromOptions(fileset, opts('GPU')); }
     catch{ landmarker = await FaceLandmarker.createFromOptions(fileset, opts('CPU')); }
+    // 分割模型（16MB）：加载失败不致命，整体退回旧方案
+    try{
+      const sopts = d => ({
+        baseOptions:{ modelAssetPath:'./vendor/selfie_multiclass.tflite.wasm', delegate:d },
+        runningMode:'IMAGE', outputConfidenceMasks:true, outputCategoryMask:false,
+      });
+      try{ segmenter = await ImageSegmenter.createFromOptions(fileset, sopts('GPU')); }
+      catch{ segmenter = await ImageSegmenter.createFromOptions(fileset, sopts('CPU')); }
+    }catch(e){ console.error('[ketu] segmenter init failed (fallback to polygon mode)', e); }
     statusEl.textContent = '';
   }catch(e){
     console.error('[ketu] landmarker init failed', e);
@@ -255,6 +265,31 @@ const centroid = idxs => {
 };
 const dist2 = (a,b) => Math.hypot(a.x-b.x, a.y-b.y);
 
+/* ---------- 人像分割：跑一次，取 头发/身体皮肤/脸部皮肤 三张置信度图 ---------- */
+function runSegment(src){
+  const res = segmenter.segment(src);
+  const masks = res.confidenceMasks;
+  if(!masks || masks.length < 4){ if(res.close) res.close(); return null; }
+  const toCanvas = m => {
+    const mw = m.width, mh = m.height;
+    const f = m.getAsFloat32Array();
+    const c = document.createElement('canvas'); c.width=mw; c.height=mh;
+    const ictx = c.getContext('2d');
+    const id = ictx.createImageData(mw, mh);
+    for(let i=0;i<f.length;i++){
+      const o = i*4;
+      id.data[o]=255; id.data[o+1]=255; id.data[o+2]=255;
+      id.data[o+3] = Math.max(0, Math.min(255, Math.round(f[i]*255)));
+    }
+    ictx.putImageData(id,0,0);
+    return c;
+  };
+  // 类别: 0背景 1头发 2身体皮肤 3脸部皮肤 4衣服 5配饰
+  const out = { hair: toCanvas(masks[1]), body: toCanvas(masks[2]), face: toCanvas(masks[3]) };
+  if(res.close) res.close();
+  return out;
+}
+
 /* ---------- 皮肤/眼睛 mask（2D canvas 画多边形，R=皮肤 G=眼睛） ---------- */
 function polyPath(ctx, idxs, w, h, scaleAbout=null, k=1){
   ctx.beginPath();
@@ -265,18 +300,25 @@ function polyPath(ctx, idxs, w, h, scaleAbout=null, k=1){
   });
   ctx.closePath();
 }
-function buildMaskCanvas(){
+function buildMaskCanvas(seg){
   const w = Math.round(imgW/2), h = Math.round(imgH/2);
   const faceW = dist2(pt(234), pt(454)) * imgW; // 大致脸宽(px, 原图尺度)
   const feather = Math.max(3, faceW*0.035/2);
 
   const mk = () => { const c=document.createElement('canvas'); c.width=w; c.height=h; return c; };
   const skin = mk(), sctx = skin.getContext('2d');
-  sctx.filter = `blur(${Math.max(4, faceW*0.05/2)}px)`;
-  sctx.fillStyle = '#fff';
-  // 以下巴为锚放大 10%：FaceMesh 的椭圆额头线偏保守，高额头会被切出分界线
-  polyPath(sctx, OVAL, w, h, pt(152), 1.10); sctx.fill();
+  if(seg){
+    // 分割模型给逐像素"脸部皮肤"，边界自带软过渡，轻羽化即可
+    sctx.drawImage(seg.face, 0, 0, w, h);
+    sctx.filter = `blur(${Math.max(2, faceW*0.015/2)}px)`;
+  } else {
+    // 退路：多边形。以下巴为锚放大 10%（FaceMesh 椭圆额头线偏保守）
+    sctx.filter = `blur(${Math.max(4, faceW*0.05/2)}px)`;
+    sctx.fillStyle = '#fff';
+    polyPath(sctx, OVAL, w, h, pt(152), 1.10); sctx.fill();
+  }
   sctx.globalCompositeOperation = 'destination-out';
+  sctx.fillStyle = '#fff';
   for(const g of [EYE_L, EYE_R]){ polyPath(sctx, g, w, h, centroid(g), 1.25); sctx.fill(); }
   // 唇/眉挖除只留本体，挖大了会在嘴周/眉周留下没吃到美白的色块
   polyPath(sctx, LIPS, w, h, centroid(LIPS), 1.12); sctx.fill();
@@ -321,8 +363,8 @@ function buildMaskCanvas(){
   return out;
 }
 
-/* ---------- 发际线检测：从眉毛向上逐列扫，肤色（色度基准）结束处=发际线 ---------- */
-function buildHairline(src){
+/* ---------- 辅助纹理：R=发际线邻近场 G=全身皮肤(美白用)。头发位置分割模型优先 ---------- */
+function buildHairline(src, seg){
   hairMaskCanvas = null; hairOK = false;
   const w = Math.round(imgW/2), h = Math.round(imgH/2);
   const half = document.createElement('canvas'); half.width=w; half.height=h;
@@ -332,73 +374,84 @@ function buildHairline(src){
 
   const sr = skinRef.map(v=>v*255);
   const slum = 0.299*sr[0]+0.587*sr[1]+0.114*sr[2];
-  const scr = sr[0]-slum, scg = sr[1]-slum, scb = sr[2]-slum;
-  const isSkin = i => {
-    const r=d[i], g=d[i+1], b=d[i+2];
-    const lum = 0.299*r+0.587*g+0.114*b;
-    if(lum < slum*0.45) return false;
-    const cr=r-lum, cg=g-lum, cb=b-lum;
-    const cd = Math.hypot(cr-scr, cg-scg, cb-scb);
-    if(cd < 42) return true;
-    // 高光豁免：顶光打爆的额头色度归零，别误判成头发
-    return lum > slum*0.92 && Math.hypot(cr,cg,cb) < 30;
-  };
-
   const faceWpx = dist2(pt(234),pt(454)) * imgW / 2;   // 半分辨率脸宽
   const faceHpx = (pt(152).y - pt(10).y) * h;
-  const xL = Math.round(pt(234).x*w + faceWpx*0.06);
-  const xR = Math.round(pt(454).x*w - faceWpx*0.06);
+  const xL = Math.max(0, Math.round(pt(234).x*w - faceWpx*0.05));
+  const xR = Math.min(w-1, Math.round(pt(454).x*w + faceWpx*0.05));
   const browY = Math.round(Math.min(pt(105).y, pt(334).y)*h) - 3;
   const topLimit = Math.max(0, Math.round(pt(10).y*h - faceHpx*0.35));
+  const band = faceWpx * 0.055;
 
-  const pts = []; const hairAcc=[0,0,0]; let hairN=0;
-  for(let x=xL; x<=xR; x+=2){
-    let run = 0, yHair = -1;
-    for(let y=browY; y>=topLimit; y--){
-      if(isSkin((y*w+x)*4)) run = 0;
-      else { run++; if(run>=4){ yHair = y+run; break; } }  // 连续4px非肤色才算头发，跳过碎发
-    }
-    if(yHair > 0){
-      pts.push([x, yHair]);
-      for(let y=yHair-10; y<=yHair-5; y++){
-        if(y<0) continue; const i=(y*w+x)*4;
+  // 头发位图：模型置信度 > 暗像素启发式
+  const hairBit = document.createElement('canvas'); hairBit.width=w; hairBit.height=h;
+  const hb = hairBit.getContext('2d');
+  if(seg){
+    hb.drawImage(seg.hair, 0, 0, w, h);
+  } else {
+    const id2 = hb.createImageData(w,h);
+    for(let y=topLimit; y<=browY; y++){
+      for(let x=xL; x<=xR; x++){
+        const i=(y*w+x)*4;
         const lum = 0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
-        if(lum < slum*0.55){ hairAcc[0]+=d[i]; hairAcc[1]+=d[i+1]; hairAcc[2]+=d[i+2]; hairN++; }
+        if(lum < slum*0.5){ id2.data[i]=255; id2.data[i+3]=255; }
       }
     }
+    hb.putImageData(id2,0,0);
   }
-  if(pts.length < 15) return;   // 发际线找不全（光头/帽子/刘海盖额）就禁用
+  // 只保留眉线以上（头发垂在脸颊两侧时别给脸侧上阴影）
+  hb.clearRect(0, Math.max(0,browY), w, h - Math.max(0,browY));
+  hb.clearRect(0, 0, Math.max(0,xL), h);
+  hb.clearRect(Math.min(w,xR), 0, w - Math.min(w,xR), h);
 
-  // 列间中值平滑，压掉发丝毛刺
-  const ys = pts.map(p=>p[1]);
-  const smoothY = ys.map((_,i)=>{
-    const win = ys.slice(Math.max(0,i-4), i+5).slice().sort((a,b)=>a-b);
-    return win[Math.floor(win.length/2)];
-  });
-
-  if(hairN) hairRef = hairAcc.map(v=>v/hairN/255);
-  void smoothY; // 扫描线只用来判有效性和采发色；成带改用邻近场，碎发自然加厚、不会画出悬空带
-  const band = faceWpx * 0.055;
-  const c = document.createElement('canvas'); c.width=w; c.height=h;
-  const ctx = c.getContext('2d');
-  const id2 = ctx.createImageData(w,h);
-  for(let y=topLimit; y<=browY; y++){
-    for(let x=xL; x<=xR; x++){
-      const i=(y*w+x)*4;
-      const lum = 0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
-      if(lum < slum*0.5){ id2.data[i]=255; id2.data[i+3]=255; }
+  // 发色采样 + 有效性：眉线以上的头发像素。
+  // 注意发际线禁用≠整张辅助纹理作废——G 通道（美白用全身皮肤）必须照常输出
+  const hd = hb.getImageData(0,0,w,h).data;
+  const hairAcc=[0,0,0]; let hairN=0;
+  for(let i=0;i<hd.length;i+=4){
+    if(hd[i+3] > 150){
+      hairAcc[0]+=d[i]; hairAcc[1]+=d[i+1]; hairAcc[2]+=d[i+2]; hairN++;
     }
   }
-  ctx.putImageData(id2,0,0);
-  const c2 = document.createElement('canvas'); c2.width=w; c2.height=h;
-  const ctx2 = c2.getContext('2d');
-  ctx2.filter = `blur(${Math.max(3, band*0.6)}px)`;
-  ctx2.drawImage(c,0,0);
-  ctx2.filter = `blur(${Math.max(2, band*0.25)}px)`;
-  ctx2.globalCompositeOperation = 'lighter';
-  ctx2.globalAlpha = 0.7;
-  ctx2.drawImage(c,0,0);
-  hairMaskCanvas = c2; hairOK = true;
+  let pd = null;
+  if(hairN >= 200){
+    hairRef = hairAcc.map(v=>v/hairN/255);
+    // 膨胀+模糊成邻近场：只有紧贴头发的皮肤吃阴影
+    const prox = document.createElement('canvas'); prox.width=w; prox.height=h;
+    const pctx = prox.getContext('2d');
+    pctx.filter = `blur(${Math.max(3, band*0.6)}px)`;
+    pctx.drawImage(hairBit,0,0);
+    pctx.filter = `blur(${Math.max(2, band*0.25)}px)`;
+    pctx.globalCompositeOperation = 'lighter';
+    pctx.globalAlpha = 0.7;
+    pctx.drawImage(hairBit,0,0);
+    pd = pctx.getImageData(0,0,w,h).data;
+    hairOK = true;
+  }
+
+  // 全身皮肤通道（分割模式）：脸部+身体皮肤取并集
+  let saData = null;
+  if(seg){
+    const sa = document.createElement('canvas'); sa.width=w; sa.height=h;
+    const sctx3 = sa.getContext('2d');
+    sctx3.drawImage(seg.face, 0, 0, w, h);
+    sctx3.globalCompositeOperation = 'lighter';
+    sctx3.drawImage(seg.body, 0, 0, w, h);
+    saData = sctx3.getImageData(0,0,w,h).data;
+  }
+
+  if(!pd && !saData) return; // 两个通道都空才真的没货
+  // 合成输出：R=邻近场 G=全身皮肤 （显式写 RGB、A=255，避开 canvas 预乘精度坑）
+  const out = document.createElement('canvas'); out.width=w; out.height=h;
+  const octx = out.getContext('2d');
+  const od = octx.createImageData(w,h);
+  for(let i=0;i<od.data.length;i+=4){
+    od.data[i]   = pd ? pd[i+3] : 0;
+    od.data[i+1] = saData ? saData[i+3] : 0;
+    od.data[i+2] = 0;
+    od.data[i+3] = 255;
+  }
+  octx.putImageData(od,0,0);
+  hairMaskCanvas = out;
 }
 
 /* ---------- 变形参数（瘦脸/大眼/瘦鼻 → shader 的 op 列表） ---------- */
@@ -481,6 +534,7 @@ uniform sampler2D uHairM;      // 发际线带
 uniform vec3 uHairC;           // 发色
 uniform vec2 uFoldO0, uFoldO1; // 两条沟的法向偏移（uv 空间）
 uniform float uFoldSplit;      // 左右分界 x
+uniform float uSeg;            // 1=分割模型可用
 uniform vec4 uG1; // exposure, contrast, saturation, temp
 uniform vec2 uG2; // tint, fade
 
@@ -520,14 +574,19 @@ void main(){
     vec3 fref = max(blur*1.03, sideRef*0.97);
     col = mix(col, max(col, fref), clamp(uFold*m.b*1.35, 0.0, 1.0));
   }
-  // 美白：不只认多边形模板（高额头/耳朵/脖子会被切出分界线），
-  // 改按肤色相似度扩散——色度接近脸颊基准就吃美白，头发背景自然排除
-  float lum = dot(col, vec3(0.299,0.587,0.114));
-  float slum = dot(uSkin, vec3(0.299,0.587,0.114));
-  vec3 chroma = col - lum, schroma = uSkin - slum;
-  float cd = length(chroma - schroma);
-  float lumGate = smoothstep(slum*0.35, slum*0.7, lum);
-  float skinness = max(m.r, (1.0 - smoothstep(0.07, 0.20, cd)) * lumGate);
+  // 美白：分割模式用模型的逐像素"全身皮肤"（脸+脖子+耳朵全覆盖，头发背景干净排除）；
+  // 退路模式按肤色相似度扩散（色度接近脸颊基准就吃美白）
+  float skinness;
+  if(uSeg > 0.5){
+    skinness = texture2D(uHairM, uv).g;
+  } else {
+    float lum = dot(col, vec3(0.299,0.587,0.114));
+    float slum = dot(uSkin, vec3(0.299,0.587,0.114));
+    vec3 chroma = col - lum, schroma = uSkin - slum;
+    float cd = length(chroma - schroma);
+    float lumGate = smoothstep(slum*0.35, slum*0.7, lum);
+    skinness = max(m.r, (1.0 - smoothstep(0.07, 0.20, cd)) * lumGate);
+  }
   col = 1.0 - (1.0-col)*(1.0 - uWhiten*(0.24*skinness + 0.04));
   // 亮眼
   col *= 1.0 + uBright*m.g*0.35;
@@ -539,7 +598,7 @@ void main(){
       vec2 px = uv*uRes;
       float n = fract(sin(dot(vec2(floor(px.x/3.0), floor(px.y/22.0)), vec2(12.9898,78.233)))*43758.5453);
       float wgt = clamp(uHairline * hm * skinness * m.r * (0.3 + 0.7*n*n), 0.0, 1.0);
-      col = mix(col, uHairC*0.85, wgt*0.38);
+      col = mix(col, uHairC*0.85, wgt*0.45);
     }
   }
   // 调色
@@ -684,6 +743,7 @@ function render(){
   gl.uniform3f(U(progMain,'uSkin'), skinRef[0], skinRef[1], skinRef[2]);
   gl.uniform1f(U(progMain,'uHairline'), neutral?0:params.hair/100);
   gl.uniform3f(U(progMain,'uHairC'), hairRef[0], hairRef[1], hairRef[2]);
+  gl.uniform1f(U(progMain,'uSeg'), segOK?1:0);
   const g = neutral ? FILTERS[0].g : FILTERS[filterIdx].g;
   gl.uniform4f(U(progMain,'uG1'), g[0],g[1],g[2],g[3]);
   gl.uniform2f(U(progMain,'uG2'), g[4],g[5]);
@@ -713,6 +773,13 @@ async function loadFile(file){
     }catch(e){ console.error('[ketu] detect failed', e); }
   }
 
+  let seg = null;
+  if(segmenter && faceOK){
+    try{ seg = runSegment(src); }
+    catch(e){ console.error('[ketu] segment failed (fallback to polygon mode)', e); }
+  }
+  segOK = !!seg;
+
   if(faceOK){
     // 肤色基准：两颊 + 额心各采一小块，取平均
     const sctx2 = src.getContext('2d');
@@ -733,12 +800,12 @@ async function loadFile(file){
       return [ -dy*wHalf/asp, dx*wHalf ];
     };
     foldU = { o0:mkOff(98,61), o1:mkOff(327,291), split:pt(4).x };
-    buildHairline(src);
+    buildHairline(src, seg);
   }
 
   glCanvas.width = imgW; glCanvas.height = imgH;
   if(!gl && !initGL()) return;
-  setupTextures(src, faceOK ? buildMaskCanvas() : null);
+  setupTextures(src, faceOK ? buildMaskCanvas(seg) : null);
   view = {k:1, tx:0, ty:0}; applyView();
 
   drop.hidden = true; glCanvas.hidden = false;
